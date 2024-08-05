@@ -1,0 +1,239 @@
+import { useNavigate } from "react-router-dom";
+import React, { useState, useEffect } from 'react';
+import { SearchOutlined } from '@ant-design/icons';
+import { firebaseDb } from "../firebase";
+import { collection, getDocs } from "firebase/firestore";
+import { Col, Row, Button, Table, Form, Input, InputNumber, Popconfirm, Typography, Select } from 'antd';
+import CustomTable from '../CustomTable';
+
+const { Option } = Select;
+
+const EditableCell = ({
+  editing,
+  dataIndex,
+  title,
+  inputType,
+  record,
+  index,
+  children,
+  ...restProps
+}) => {
+  const inputNode = inputType === 'number' ? <InputNumber /> : <Input />;
+  return (
+    <td {...restProps}>
+      {editing ? (
+        <Form.Item
+          name={dataIndex}
+          style={{ margin: 0 }}
+          rules={[{ required: true, message: Please Input ${title}! }]}
+        >
+          {inputNode}
+        </Form.Item>
+      ) : (
+        children
+      )}
+    </td>
+  );
+};
+
+const TableComponent = () => {
+  const [form] = Form.useForm();
+  const [weekData, setWeekData] = useState([]);
+  const [editingKey, setEditingKey] = useState('');
+  const [searchText, setSearchText] = useState('');
+  const [searchedColumn, setSearchedColumn] = useState('');
+  const navigate = useNavigate();
+
+  const isEditing = (record) => record.key === editingKey;
+
+  const edit = (record) => {
+    form.setFieldsValue({ ...record });
+    setEditingKey(record.key);
+  };
+
+  const cancel = () => {
+    setEditingKey('');
+  };
+
+  const save = async (key) => {
+    try {
+      const row = await form.validateFields();
+      const newData = [...weekData];
+      const index = newData.findIndex((item) => key === item.key);
+
+      if (index > -1) {
+        const item = newData[index];
+        newData.splice(index, 1, { ...item, ...row });
+        setWeekData(newData);
+        setEditingKey('');
+      } else {
+        newData.push(row);
+        setWeekData(newData);
+        setEditingKey('');
+      }
+    } catch (errInfo) {
+      console.log('Validate Failed:', errInfo);
+    }
+  };
+
+  const timestampToDate = (timestamp) => {
+    return timestamp ? new Date(timestamp.seconds * 1000) : null;
+  };
+
+  const handleSearch = () => {
+    if (searchedColumn && searchText) {
+      const filteredData = weekData.filter((item) => {
+        const value = item[searchedColumn];
+        return value && value.toString().toLowerCase().includes(searchText.toLowerCase());
+      });
+      setWeekData(filteredData);
+    } else {
+      // Fetch the original data from the server if search text or column is cleared
+      fetchData();
+    }
+  };
+
+  const fetchData = async () => {
+    const querySnapshot = await getDocs(collection(firebaseDb, "your-collection-name"));
+    const data = querySnapshot.docs.map(doc => ({ ...doc.data(), key: doc.id }));
+    setWeekData(data);
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const columns = [
+    {
+      title: 'Date',
+      dataIndex: 'date',
+      key: 'date',
+      render: (id) => new Date(id.split('T')[0]).toLocaleDateString(),
+      editable: true,
+      sorter: (a, b) => new Date(a.id) - new Date(b.id),
+    },
+    {
+      title: 'Vendor Name',
+      dataIndex: 'name',
+      key: 'name',
+      editable: true,
+      sorter: (a, b) => a.name.localeCompare(b.name),
+    },
+    {
+      title: 'Invoice Number',
+      dataIndex: 'invoice_number',
+      key: 'invoice_number',
+      editable: true,
+      sorter: (a, b) => a.invoice_number - b.invoice_number,
+    },
+    {
+      title: 'Invoice Date',
+      dataIndex: 'invoice_date',
+      key: 'invoice_date',
+      render: (date) => timestampToDate(date)?.toLocaleDateString() || 'N/A',
+      editable: true,
+      sorter: (a, b) => new Date(a.invoice_date) - new Date(b.invoice_date),
+    },
+    {
+      title: 'Delivery Date',
+      dataIndex: 'delivery_date',
+      key: 'delivery_date',
+      render: (date) => timestampToDate(date)?.toLocaleDateString() || 'N/A',
+      editable: true,
+      sorter: (a, b) => new Date(a.delivery_date) - new Date(b.delivery_date),
+    },
+    {
+      title: 'Operation',
+      dataIndex: 'operation',
+      render: (_, record) => {
+        const editable = isEditing(record);
+        return editable ? (
+          <span>
+            <Typography.Link onClick={() => save(record.key)} style={{ marginRight: 8 }}>
+              Save
+            </Typography.Link>
+            <Popconfirm title="Sure to cancel?" onConfirm={cancel}>
+              <a>Cancel</a>
+            </Popconfirm>
+          </span>
+        ) : (
+          <Typography.Link disabled={editingKey !== ''} onClick={() => edit(record)}>
+            Edit
+          </Typography.Link>
+        );
+      },
+    },
+    {
+      title: 'Payment',
+      dataIndex: 'payment',
+      key: 'payment',
+      editable: true,
+      render: () => <Typography.Link>Pay Now</Typography.Link>,
+    },
+  ];
+
+  return (
+    <div>
+      <Row gutter={16} style={{ marginBottom: 16 }}>
+        <Col span={8}>
+          <Select
+            placeholder="Select Column"
+            onChange={(value) => setSearchedColumn(value)}
+            style={{ width: '100%' }}
+          >
+            {columns.map((col) => (
+              <Option key={col.dataIndex} value={col.dataIndex}>
+                {col.title}
+              </Option>
+            ))}
+          </Select>
+        </Col>
+        <Col span={8}>
+          <Input
+            placeholder="Search"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            onPressEnter={handleSearch}
+          />
+        </Col>
+        <Col span={8}>
+          <Button type="primary" onClick={handleSearch}>
+            Search
+          </Button>
+        </Col>
+      </Row>
+      <Form form={form} component={false}>
+        <Table
+          components={{
+            body: {
+              cell: EditableCell,
+            },
+          }}
+          bordered
+          dataSource={weekData}
+          columns={columns.map((col) => {
+            if (!col.editable) {
+              return col;
+            }
+            return {
+              ...col,
+              onCell: (record) => ({
+                record,
+                inputType: col.dataIndex === 'number' ? 'number' : 'text',
+                dataIndex: col.dataIndex,
+                title: col.title,
+                editing: isEditing(record),
+              }),
+            };
+          })}
+          rowClassName="editable-row"
+          pagination={{
+            onChange: cancel,
+          }}
+        />
+      </Form>
+    </div>
+  );
+};
+
+export default TableComponent;
